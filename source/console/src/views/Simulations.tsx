@@ -46,7 +46,7 @@ export default function Simulations(props: IPageProps): JSX.Element {
      * react useEffect hook
      * gets simulation data when page is loaded
      */
-    useEffect(() => { loadSimulations(); }, []);
+    useEffect(() => { loadSimulations(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
     /**
      * react useEffect hook

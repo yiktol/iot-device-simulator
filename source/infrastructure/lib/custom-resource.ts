@@ -97,7 +97,7 @@ export class CustomResourcesConstruct extends Construct {
     this.helperLambda = new LambdaFunction(this, 'HelperLambda', {
       description: 'IoT Device Simulator custom resource function',
       handler: 'index.handler',
-      runtime: Runtime.NODEJS_18_X,
+      runtime: Runtime.NODEJS_22_X,
       code: Code.fromBucket(this.sourceCodeBucket, `${this.sourceCodePrefix}/custom-resource.zip`),
       timeout: Duration.seconds(240),
       role: this.helperLambdaRole,

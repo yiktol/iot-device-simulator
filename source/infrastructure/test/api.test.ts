@@ -140,7 +140,7 @@ function buildStack() {
     const testSourceBucket = Bucket.fromBucketName(stack, 'SourceCodeBucket', 'test-bucket-region');
     const testFunction = new LambdaFunction(stack, 'testFunction', {
         handler: 'index.handler',
-        runtime: Runtime.NODEJS_18_X,
+        runtime: Runtime.NODEJS_22_X,
         code: Code.fromBucket(testSourceBucket, `prefix/custom-resource.zip`)
     });
 

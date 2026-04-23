@@ -115,7 +115,7 @@ export default function SimulationDetails(props: IPageProps): JSX.Element {
 	useEffect(() => {
 		loadSimulation();
 		loadDevices();
-	}, []);
+	}, []); // eslint-disable-line react-hooks/exhaustive-deps
 
 	/**
 	 * updates the map coordinates with new messages if a map exists
@@ -200,7 +200,7 @@ export default function SimulationDetails(props: IPageProps): JSX.Element {
 		return () => {
 			iotSub.unsubscribe();
 		};
-	}, [topics]);
+	}, [topics]); // eslint-disable-line react-hooks/exhaustive-deps
 
 	/**
 	 * start simulation
@@ -359,6 +359,7 @@ export default function SimulationDetails(props: IPageProps): JSX.Element {
 														</Dropdown.Item>
 													));
 												}
+												return null;
 											})}
 										</DropdownButton>
 									</Col>

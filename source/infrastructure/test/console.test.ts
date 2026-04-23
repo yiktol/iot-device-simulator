@@ -15,7 +15,6 @@ describe('When IoT Device Simulator ConsoleConstruct is created', () => {
 
     const loggingBucketCapture = new Capture();
     const commonResourceDistributionS3BucketCapture = new Capture();
-    const cloudFrontDistributionOriginCapture = new Capture();
 
     it('it should have s3 buckets', () => {
         template.resourceCountIs('AWS::S3::Bucket', 2);
@@ -79,24 +78,13 @@ describe('When IoT Device Simulator ConsoleConstruct is created', () => {
                         ],
                       },
                       'S3OriginConfig': {
-                        'OriginAccessIdentity': {
-                          'Fn::Join': [
-                            '',
-                            [
-                              'origin-access-identity/cloudfront/',
-                              {
-                                'Ref': cloudFrontDistributionOriginCapture,
-                              },
-                            ],
-                          ],
-                        },
+                        'OriginAccessIdentity': '',
                       },
                     },
                   ]
             }
         });
         expect(template.toJSON()['Resources'][commonResourceDistributionS3BucketCapture.asString()]['Type']).toStrictEqual('AWS::S3::Bucket');
-        expect(template.toJSON()['Resources'][cloudFrontDistributionOriginCapture.asString()]['Type']).toStrictEqual('AWS::CloudFront::CloudFrontOriginAccessIdentity');
     });
 
     it('it should have identity resources', () => {

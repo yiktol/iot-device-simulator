@@ -37,7 +37,7 @@ For more information and a detailed deployment guide, visit the [IoT Device Simu
 In addition to the AWS Solutions Constructs, the solution uses AWS CDK directly to create infrastructure resources.
 # Customizing the Solution
 ## Prerequisites for Customization
-- Node.js 18.x or later
+- Node.js 22.x or later
 
 ### 1. Clone the repository
 ```bash

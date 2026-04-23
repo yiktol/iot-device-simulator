@@ -48,7 +48,7 @@ export default function DeviceFields(props: IProps): JSX.Element {
      */
     useEffect(() => {
         loadDeviceTypes();
-    }, [])
+    }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
     /**
      * React useEffect hook
@@ -79,7 +79,7 @@ export default function DeviceFields(props: IProps): JSX.Element {
         });
         
         setErrs(newErrs);
-    }, [props.simulation, props.simType])
+    }, [props.simulation, props.simType]) // eslint-disable-line react-hooks/exhaustive-deps
 
     /**
      * Updates devices on field change related to devices

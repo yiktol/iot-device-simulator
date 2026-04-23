@@ -38,7 +38,7 @@ function App(): JSX.Element {
 	const { authStatus } = useAuthenticator((context) => [context.authStatus]);
 
 	useEffect(() => {
-		if (authStatus == "authenticated") {
+		if (authStatus === "authenticated") {
 			Auth.currentCredentials().then(async (credentials) => {
 				const identityId = credentials.identityId;
 				const awsConfig = {

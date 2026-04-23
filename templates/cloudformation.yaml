@@ -1,0 +1,272 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: >
+  IoT Device Simulator - Data Pipeline Stack.
+  Routes IoT telemetry data through Kinesis to S3 and catalogs it with Glue for analytics.
+
+Parameters:
+  IoTTopicName:
+    Type: String
+    MinLength: 1
+    Default: "telemetry"
+    Description: "IoT Topic Name that your devices will send messages to."
+
+Resources:
+  # ---------------------------------------------------------------------------
+  # S3 Buckets
+  # ---------------------------------------------------------------------------
+  S3BucketRaw:
+    Type: "AWS::S3::Bucket"
+    Properties:
+      BucketName: !Sub "iot-raw-${AWS::AccountId}"
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+
+  S3BucketClean:
+    Type: "AWS::S3::Bucket"
+    Properties:
+      BucketName: !Sub "iot-clean-${AWS::AccountId}"
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+
+  # ---------------------------------------------------------------------------
+  # Kinesis Data Stream
+  # ---------------------------------------------------------------------------
+  IoTStream:
+    Type: AWS::Kinesis::Stream
+    Properties:
+      Name: !Ref IoTTopicName
+      StreamModeDetails:
+        StreamMode: ON_DEMAND
+
+  # ---------------------------------------------------------------------------
+  # Kinesis Firehose Delivery Stream
+  # ---------------------------------------------------------------------------
+  IoTKDFDelivery:
+    Type: AWS::KinesisFirehose::DeliveryStream
+    Properties:
+      DeliveryStreamName: !Sub "${IoTTopicName}-delivery"
+      DeliveryStreamType: KinesisStreamAsSource
+      KinesisStreamSourceConfiguration:
+        KinesisStreamARN: !GetAtt IoTStream.Arn
+        RoleARN: !GetAtt DataFirehoseRole.Arn
+      ExtendedS3DestinationConfiguration:
+        BucketARN: !GetAtt S3BucketRaw.Arn
+        BufferingHints:
+          IntervalInSeconds: 60
+          SizeInMBs: 1
+        CompressionFormat: UNCOMPRESSED
+        Prefix: "iot-raw/"
+        ErrorOutputPrefix: "error/"
+        RoleARN: !GetAtt DataFirehoseRole.Arn
+
+  # ---------------------------------------------------------------------------
+  # Firehose IAM Role
+  # ---------------------------------------------------------------------------
+  DataFirehoseRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "KinesisDataFirehoseRole-${AWS::StackName}"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: firehose.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: FirehoseS3Policy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: S3Access
+                Effect: Allow
+                Action:
+                  - s3:AbortMultipartUpload
+                  - s3:GetBucketLocation
+                  - s3:GetObject
+                  - s3:ListBucket
+                  - s3:ListBucketMultipartUploads
+                  - s3:PutObject
+                Resource:
+                  - !GetAtt S3BucketRaw.Arn
+                  - !Sub "${S3BucketRaw.Arn}/*"
+              - Sid: KMSAccess
+                Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:GenerateDataKey
+                Resource:
+                  - !Sub "arn:aws:kms:${AWS::Region}:${AWS::AccountId}:key/*"
+                Condition:
+                  StringEquals:
+                    kms:ViaService: !Sub "s3.${AWS::Region}.amazonaws.com"
+                  StringLike:
+                    kms:EncryptionContext:aws:s3:arn:
+                      - !Sub "${S3BucketRaw.Arn}/*"
+              - Sid: KinesisAccess
+                Effect: Allow
+                Action:
+                  - kinesis:DescribeStream
+                  - kinesis:GetShardIterator
+                  - kinesis:GetRecords
+                  - kinesis:ListShards
+                Resource:
+                  - !GetAtt IoTStream.Arn
+              - Sid: CloudWatchLogs
+                Effect: Allow
+                Action:
+                  - logs:PutLogEvents
+                Resource:
+                  - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/kinesisfirehose/${IoTTopicName}-delivery:log-stream:*"
+
+  # ---------------------------------------------------------------------------
+  # IoT Topic Rule -> Kinesis
+  # ---------------------------------------------------------------------------
+  IoTTopicRule:
+    Type: AWS::IoT::TopicRule
+    Properties:
+      RuleName: !Sub "${IoTTopicName}_to_kinesis"
+      TopicRulePayload:
+        Description: "Route IoT device telemetry to Kinesis Data Stream"
+        AwsIotSqlVersion: "2016-03-23"
+        RuleDisabled: false
+        Sql: !Sub "SELECT * FROM '${IoTTopicName}'"
+        Actions:
+          - Kinesis:
+              StreamName: !Ref IoTTopicName
+              PartitionKey: "${newuuid()}"
+              RoleArn: !GetAtt IoTTopicRuleRole.Arn
+
+  IoTTopicRuleRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "IoTTopicRuleRole-${AWS::StackName}"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: iot.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: IoTToKinesisPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - kinesis:PutRecord
+                  - kinesis:PutRecords
+                Resource:
+                  - !GetAtt IoTStream.Arn
+
+  # ---------------------------------------------------------------------------
+  # Glue Database + Crawlers
+  # ---------------------------------------------------------------------------
+  GlueDB:
+    Type: AWS::Glue::Database
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseInput:
+        Description: "IoT Device Simulator analytics database"
+        Name: !Sub "iotdb_${AWS::StackName}"
+
+  GlueServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "AWSGlueServiceRole-${AWS::StackName}"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: glue.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSGlueServiceRole
+      Policies:
+        - PolicyName: GlueS3AccessPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:ListBucket
+                  - s3:GetBucketLocation
+                Resource:
+                  - !GetAtt S3BucketRaw.Arn
+                  - !Sub "${S3BucketRaw.Arn}/*"
+                  - !GetAtt S3BucketClean.Arn
+                  - !Sub "${S3BucketClean.Arn}/*"
+
+  IoTRawGlueCrawler:
+    Type: AWS::Glue::Crawler
+    Properties:
+      Name: !Sub "iot-raw-crawler-${AWS::StackName}"
+      Role: !GetAtt GlueServiceRole.Arn
+      DatabaseName: !Ref GlueDB
+      Targets:
+        S3Targets:
+          - Path: !Sub "s3://${S3BucketRaw}/iot-raw/"
+
+  IoTCleanGlueCrawler:
+    Type: AWS::Glue::Crawler
+    Properties:
+      Name: !Sub "iot-clean-crawler-${AWS::StackName}"
+      Role: !GetAtt GlueServiceRole.Arn
+      DatabaseName: !Ref GlueDB
+      Targets:
+        S3Targets:
+          - Path: !Sub "s3://${S3BucketClean}/iot-clean/"
+
+Outputs:
+  RawBucketName:
+    Description: "S3 bucket for raw IoT data"
+    Value: !Ref S3BucketRaw
+
+  CleanBucketName:
+    Description: "S3 bucket for cleaned IoT data"
+    Value: !Ref S3BucketClean
+
+  KinesisStreamName:
+    Description: "Kinesis Data Stream name"
+    Value: !Ref IoTStream
+
+  KinesisStreamArn:
+    Description: "Kinesis Data Stream ARN"
+    Value: !GetAtt IoTStream.Arn
+
+  FirehoseDeliveryStreamName:
+    Description: "Firehose Delivery Stream name"
+    Value: !Ref IoTKDFDelivery
+
+  GlueDatabaseName:
+    Description: "Glue database name for IoT analytics"
+    Value: !Ref GlueDB
+
+  IoTTopicRuleName:
+    Description: "IoT Topic Rule name"
+    Value: !Ref IoTTopicRule

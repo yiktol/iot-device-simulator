@@ -6,7 +6,7 @@
  */
 
 'use strict';
-const faker = require('faker');
+const faker = require('@faker-js/faker');
 const { nanoid, customAlphabet } = require('nanoid');
 const randomLocation = require('random-location')
 const moment = require('moment');

@@ -126,14 +126,12 @@ export class IDSStack extends Stack {
       configuration: {
         style: 'VectorEsriNavigation'
       },
-      mapName: `${customResources.reducedStackName}-IotDeviceSimulatorMap-${customResources.uniqueSuffix}`,
-      pricingPlan: 'RequestBasedUsage'
+      mapName: `${customResources.reducedStackName}-IotDeviceSimulatorMap-${customResources.uniqueSuffix}`
     });
 
     const idsPlaceIndex = new CfnPlaceIndex(this, "IotDeviceSimulatorPlaceIndex", {
       dataSource: "Esri",
-      indexName: `${customResources.reducedStackName}-IoTDeviceSimulatorPlaceIndex-${customResources.uniqueSuffix}`,
-      pricingPlan: "RequestBasedUsage"
+      indexName: `${customResources.reducedStackName}-IoTDeviceSimulatorPlaceIndex-${customResources.uniqueSuffix}`
     });
 
     const console = new ConsoleConstruct(this, 'Console', {

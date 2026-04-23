@@ -75,7 +75,7 @@ export default function DeviceTypes(props: IPageProps): JSX.Element {
      * React useEffect hook
      * retrieves the device types from dynamodb
      */
-    useEffect(() => { loadDeviceTypes(); }, []);
+    useEffect(() => { loadDeviceTypes(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
     /** React useEffect hook
      * sets showAlert on deviceTypes changes

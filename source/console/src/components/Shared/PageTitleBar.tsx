@@ -42,7 +42,7 @@ export default function PageTitleBar(props: any): JSX.Element {
       getSimulationStats();
     }, 30000);
     return () => clearInterval(interval);
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   /**
    * adds a breadcrumb for each item in path

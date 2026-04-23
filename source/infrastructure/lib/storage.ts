@@ -32,14 +32,14 @@ export class StorageContruct extends Construct {
       billingMode: BillingMode.PAY_PER_REQUEST,
       encryption: TableEncryption.AWS_MANAGED,
       partitionKey: { name: 'simId', type: AttributeType.STRING },
-      pointInTimeRecovery: true
+      pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true }
     });
 
     this.deviceTypesTable = new Table(this, 'IDS-Device-Types-Table', {
       billingMode: BillingMode.PAY_PER_REQUEST,
       encryption: TableEncryption.AWS_MANAGED,
       partitionKey: { name: 'typeId', type: AttributeType.STRING },
-      pointInTimeRecovery: true
+      pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true }
     });
 
     this.routesBucket = new Bucket(this, 'RoutesBucket', {

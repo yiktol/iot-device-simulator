@@ -117,7 +117,7 @@ export class SimulatorConstruct extends Construct {
                 ROUTE_BUCKET: props.routesBucket.bucketName
             },
             handler: 'index.handler',
-            runtime: Runtime.NODEJS_18_X,
+            runtime: Runtime.NODEJS_22_X,
             timeout: Duration.minutes(15),
             role: simulatorLambdaRole
         });
@@ -136,7 +136,7 @@ export class SimulatorConstruct extends Construct {
         const getDeviceTypeMap = new SFMap(this, 'getDeviceTypeMap', {
             "itemsPath": "$.simulation.devices",
             "resultPath": "$.simulation.devices",
-            "parameters": {
+            "itemSelector": {
                 "typeId.$": "$$.Map.Item.Value.typeId",
                 "amount.$": "$$.Map.Item.Value.amount"
             },
@@ -180,7 +180,7 @@ export class SimulatorConstruct extends Construct {
         updateSimTable.addCatch(done, {errors: ["DynamoDB.ConditionalCheckFailedException"]});
 
         const definition = Chain
-            .start(getDeviceTypeMap.iterator(getDeviceTypeInfo))
+            .start(getDeviceTypeMap.itemProcessor(getDeviceTypeInfo))
             .next(simulatorInvoke.addCatch(updateSimTable, { resultPath: '$.error' }))
             .next(devicesRunning
                 .when(
@@ -240,7 +240,7 @@ export class SimulatorConstruct extends Construct {
                 UUID: props.uuid
             },
             handler: 'index.handler',
-            runtime: Runtime.NODEJS_18_X,
+            runtime: Runtime.NODEJS_22_X,
             timeout: Duration.minutes(1),
             role: microservicesRole
         });

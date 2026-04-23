@@ -25,7 +25,7 @@ describe('When IoT Device Simulator SimulatorConstruct is created', () => {
             Type:'AWS::Lambda::Function',
             Properties: {
                 Code: Match.anyValue(),
-                Runtime: 'nodejs18.x',
+                Runtime: 'nodejs22.x',
                 Handler: 'index.handler',
                 Timeout: 60,
                 Description: 'IoT Device Simulator microservices function',

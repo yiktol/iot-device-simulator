@@ -39,7 +39,10 @@ NagSuppressions.addStackSuppressions(stack, [
 	{ id: 'AwsSolutions-APIG3', reason: 'No need to enable WAF as it is up to users.' },
 	{ id: 'AwsSolutions-APIG4', reason: 'Authorized by IAM' },
 	{ id: 'AwsSolutions-COG4', reason: 'Authorized by IAM' },
-	{ id: 'AwsSolutions-IAM4', reason: 'AmazonAPIGatewayPushToCloudWatchLogs managed policy is used by CDK itself.'}
+	{ id: 'AwsSolutions-IAM4', reason: 'AmazonAPIGatewayPushToCloudWatchLogs managed policy is used by CDK itself.'},
+	{ id: 'AwsSolutions-L1', reason: 'Node.js 22 is the current LTS runtime with support until April 2027. Node.js 24 is too new for production use.' },
+	{ id: 'AwsSolutions-COG8', reason: 'Cognito Plus tier is not required for this solution. Advanced security mode ENFORCED is already configured.' },
+	{ id: 'AwsSolutions-CFR7', reason: 'CloudFront distribution uses CloudFrontToS3 Solutions Construct which manages origin access appropriately.' }
   ]);
 Aspects.of(stack).add(new LambdaFunctionAspect());
 Aspects.of(app).add(new AwsSolutionsChecks({ verbose: true }));

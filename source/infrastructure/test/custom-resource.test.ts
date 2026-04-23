@@ -26,7 +26,7 @@ describe('When IoT Device Simulator customResourcesConstruct is created', () => 
             Type:'AWS::Lambda::Function',
             Properties: {
                 Code: Match.anyValue(),
-                Runtime: 'nodejs18.x',
+                Runtime: 'nodejs22.x',
                 Handler: 'index.handler',
                 Timeout: 240,
                 Description: 'IoT Device Simulator custom resource function',

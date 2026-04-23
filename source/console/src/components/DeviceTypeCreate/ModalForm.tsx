@@ -50,7 +50,7 @@ export default function ModalForm(props: IProps): JSX.Element {
             newErrs = newErrs.name ? { name: newErrs.name } : {};
         }
         setErrs({ ...newErrs });
-    }, [attr])
+    }, [attr]) // eslint-disable-line react-hooks/exhaustive-deps
 
     /**
      * checks validity of attribtue fields and submits
@@ -102,7 +102,7 @@ export default function ModalForm(props: IProps): JSX.Element {
         if (props.showModal === false) {
             setAttr({ ...attr, ...getAttrFieldDefaults(attr.type) })
         }
-    }, [props.showModal])
+    }, [props.showModal]) // eslint-disable-line react-hooks/exhaustive-deps
 
     /**
      * reset state and close modal

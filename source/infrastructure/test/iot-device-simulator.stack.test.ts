@@ -28,7 +28,7 @@ describe('When IoT Device Simulator stack is created', () => {
 
         template.hasResourceProperties('AWS::Lambda::Function', {
             Code: Match.anyValue(),
-            Runtime: 'nodejs18.x',
+            Runtime: 'nodejs22.x',
             Handler: 'index.handler',
             Timeout: 240,
             Description: 'IoT Device Simulator custom resource function',
@@ -43,7 +43,7 @@ describe('When IoT Device Simulator stack is created', () => {
 
         template.hasResourceProperties('AWS::Lambda::Function', {
             Code: Match.anyValue(),
-            Runtime: 'nodejs18.x',
+            Runtime: 'nodejs22.x',
             Handler: 'index.handler',
             Timeout: 900,
             Description: 'IoT Device Simulator function',
@@ -76,7 +76,7 @@ describe('When IoT Device Simulator stack is created', () => {
 
         template.hasResourceProperties('AWS::Lambda::Function', {
             Code: Match.anyValue(),
-            Runtime: 'nodejs18.x',
+            Runtime: 'nodejs22.x',
             Handler: 'index.handler',
             Timeout: 60,
             Description: 'IoT Device Simulator microservices function',
