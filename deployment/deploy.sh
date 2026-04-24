@@ -129,27 +129,27 @@ if [ -z "$BUCKET_PREFIX" ]; then
 fi
 BUCKET_NAME="${BUCKET_PREFIX}-${REGION}"
 
-# Check if stacks already exist (allow CREATE_COMPLETE to be skipped)
+# Check if stacks already exist
 STACK_STATUS=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region "$REGION" --query "Stacks[0].StackStatus" --output text 2>/dev/null || echo "DOES_NOT_EXIST")
-SIM_SKIP=false
-if [ "$STACK_STATUS" = "CREATE_COMPLETE" ]; then
-    SIM_SKIP=true
-    warn "Simulator stack '$STACK_NAME' already exists (CREATE_COMPLETE). Will skip deployment."
-elif [ "$STACK_STATUS" != "DOES_NOT_EXIST" ]; then
-    fail "Stack '$STACK_NAME' exists in $REGION with status: $STACK_STATUS. Delete it first or use a different --stack-name."
-else
+SIM_ACTION="create"
+if [[ "$STACK_STATUS" =~ ^(CREATE_COMPLETE|UPDATE_COMPLETE|UPDATE_ROLLBACK_COMPLETE)$ ]]; then
+    SIM_ACTION="update"
+    warn "Simulator stack '$STACK_NAME' already exists ($STACK_STATUS). Will update on rerun."
+elif [ "$STACK_STATUS" = "DOES_NOT_EXIST" ]; then
     success "Stack name '$STACK_NAME' is available"
+else
+    fail "Stack '$STACK_NAME' exists in $REGION with status: $STACK_STATUS. Delete it first or use a different --stack-name."
 fi
 
 PIPELINE_STATUS=$(aws cloudformation describe-stacks --stack-name "$PIPELINE_STACK_NAME" --region "$REGION" --query "Stacks[0].StackStatus" --output text 2>/dev/null || echo "DOES_NOT_EXIST")
-PIPE_SKIP=false
-if [ "$PIPELINE_STATUS" = "CREATE_COMPLETE" ]; then
-    PIPE_SKIP=true
-    warn "Pipeline stack '$PIPELINE_STACK_NAME' already exists (CREATE_COMPLETE). Will skip deployment."
-elif [ "$PIPELINE_STATUS" != "DOES_NOT_EXIST" ]; then
-    fail "Pipeline stack '$PIPELINE_STACK_NAME' exists in $REGION with status: $PIPELINE_STATUS. Delete it first or use a different --stack-name."
-else
+PIPE_ACTION="create"
+if [[ "$PIPELINE_STATUS" =~ ^(CREATE_COMPLETE|UPDATE_COMPLETE|UPDATE_ROLLBACK_COMPLETE)$ ]]; then
+    PIPE_ACTION="update"
+    warn "Pipeline stack '$PIPELINE_STACK_NAME' already exists ($PIPELINE_STATUS). Will update on rerun."
+elif [ "$PIPELINE_STATUS" = "DOES_NOT_EXIST" ]; then
     success "Pipeline stack name '$PIPELINE_STACK_NAME' is available"
+else
+    fail "Pipeline stack '$PIPELINE_STACK_NAME' exists in $REGION with status: $PIPELINE_STATUS. Delete it first or use a different --stack-name."
 fi
 
 echo ""
@@ -172,65 +172,81 @@ fi
 # =============================================================================
 # STEP 2: Create S3 bucket
 # =============================================================================
-separator "Step 2: Creating S3 bucket"
-
-if aws s3api head-bucket --bucket "$BUCKET_NAME" --region "$REGION" 2>/dev/null; then
-    warn "Bucket $BUCKET_NAME already exists, reusing it."
+if [ "$SIM_ACTION" = "update" ] && [ "$PIPE_ACTION" = "update" ]; then
+    separator "Step 2: Skipping S3 bucket creation (stacks already deployed)"
+    success "Both stacks already exist. Skipping bucket setup."
 else
-    info "Creating bucket: $BUCKET_NAME"
-    aws s3 mb "s3://${BUCKET_NAME}" --region "$REGION"
-    success "Bucket created: $BUCKET_NAME"
-fi
+    separator "Step 2: Creating S3 bucket"
 
-# Block public access on the bucket
-aws s3api put-public-access-block \
-    --bucket "$BUCKET_NAME" \
-    --region "$REGION" \
-    --public-access-block-configuration \
-    "BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true"
-success "Public access blocked on $BUCKET_NAME"
+    if aws s3api head-bucket --bucket "$BUCKET_NAME" --region "$REGION" 2>/dev/null; then
+        warn "Bucket $BUCKET_NAME already exists, reusing it."
+    else
+        info "Creating bucket: $BUCKET_NAME"
+        aws s3 mb "s3://${BUCKET_NAME}" --region "$REGION"
+        success "Bucket created: $BUCKET_NAME"
+    fi
+
+    # Block public access on the bucket
+    aws s3api put-public-access-block \
+        --bucket "$BUCKET_NAME" \
+        --region "$REGION" \
+        --public-access-block-configuration \
+        "BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true"
+    success "Public access blocked on $BUCKET_NAME"
+fi
 
 # =============================================================================
 # STEP 3: Build the solution
 # =============================================================================
-separator "Step 3: Building the solution"
+if [ "$SIM_ACTION" = "update" ] && [ "$PIPE_ACTION" = "update" ]; then
+    separator "Step 3: Skipping build (stacks already deployed)"
+    success "Both stacks already exist. Skipping application build."
+else
+    separator "Step 3: Building the solution"
 
-cd "$SCRIPT_DIR"
-chmod +x build-s3-dist.sh
-./build-s3-dist.sh "$BUCKET_PREFIX" "$SOLUTION_NAME" "$VERSION"
+    cd "$SCRIPT_DIR"
+    chmod +x build-s3-dist.sh
+    ./build-s3-dist.sh "$BUCKET_PREFIX" "$SOLUTION_NAME" "$VERSION"
 
-if [ $? -ne 0 ]; then
-    fail "Build failed. Check the output above for errors."
+    if [ $? -ne 0 ]; then
+        fail "Build failed. Check the output above for errors."
+    fi
+    success "Build completed"
 fi
-success "Build completed"
 
 # =============================================================================
 # STEP 4: Upload assets to S3
 # =============================================================================
-separator "Step 4: Uploading assets to S3"
+if [ "$SIM_ACTION" = "update" ] && [ "$PIPE_ACTION" = "update" ]; then
+    separator "Step 4: Skipping asset upload (stacks already deployed)"
+    success "Both stacks already exist. Skipping asset upload."
+else
+    separator "Step 4: Uploading assets to S3"
 
-info "Uploading global assets..."
-aws s3 sync "$SCRIPT_DIR/global-s3-assets/" \
-    "s3://${BUCKET_NAME}/${SOLUTION_NAME}/${VERSION}/" \
-    --region "$REGION"
+    info "Uploading global assets..."
+    aws s3 sync "$SCRIPT_DIR/global-s3-assets/" \
+        "s3://${BUCKET_NAME}/${SOLUTION_NAME}/${VERSION}/" \
+        --region "$REGION"
 
-info "Uploading regional assets..."
-aws s3 sync "$SCRIPT_DIR/regional-s3-assets/" \
-    "s3://${BUCKET_NAME}/${SOLUTION_NAME}/${VERSION}/" \
-    --region "$REGION"
+    info "Uploading regional assets..."
+    aws s3 sync "$SCRIPT_DIR/regional-s3-assets/" \
+        "s3://${BUCKET_NAME}/${SOLUTION_NAME}/${VERSION}/" \
+        --region "$REGION"
 
-success "All assets uploaded"
+    success "All assets uploaded"
+fi
 
 # =============================================================================
 # STEP 5: Deploy IoT Device Simulator stack
 # =============================================================================
 separator "Step 5: Deploying IoT Device Simulator stack"
 
-if [ "$SIM_SKIP" = true ]; then
-    success "Simulator stack '$STACK_NAME' already deployed. Skipping."
+if [ "$SIM_ACTION" = "update" ]; then
+    warn "Simulator stack '$STACK_NAME' uses an S3-hosted template. Skipping update."
+    warn "To update the simulator stack, delete it first and redeploy, or update it manually via the CloudFormation console."
+    success "Simulator stack '$STACK_NAME' unchanged."
 else
     TEMPLATE_URL="https://${BUCKET_NAME}.s3.amazonaws.com/${SOLUTION_NAME}/${VERSION}/iot-device-simulator.template"
-
     info "Template URL: $TEMPLATE_URL"
     info "Creating stack '$STACK_NAME'..."
 
@@ -279,8 +295,56 @@ fi
 # =============================================================================
 separator "Step 6: Deploying Data Pipeline stack"
 
-if [ "$PIPE_SKIP" = true ]; then
-    success "Pipeline stack '$PIPELINE_STACK_NAME' already deployed. Skipping."
+if [ "$PIPE_ACTION" = "update" ]; then
+    info "Updating pipeline stack '$PIPELINE_STACK_NAME'..."
+
+    UPDATE_OUTPUT=$(aws cloudformation update-stack \
+        --region "$REGION" \
+        --template-body "file://${PIPELINE_TEMPLATE}" \
+        --stack-name "$PIPELINE_STACK_NAME" \
+        --capabilities CAPABILITY_NAMED_IAM \
+        --parameters "ParameterKey=IoTTopicName,ParameterValue=${IOT_TOPIC}" \
+        --tags "Key=Solution,Value=IoTDeviceSimulator" "Key=Version,Value=${VERSION}" 2>&1) || {
+        if echo "$UPDATE_OUTPUT" | grep -q "No updates are to be performed"; then
+            success "Pipeline stack '$PIPELINE_STACK_NAME' is already up to date. No changes needed."
+            PIPE_ACTION="skip"
+        else
+            fail "Pipeline stack update failed: $UPDATE_OUTPUT"
+        fi
+    }
+
+    if [ "$PIPE_ACTION" = "update" ]; then
+        success "Pipeline stack update initiated"
+
+        info "Waiting for pipeline stack update..."
+        while true; do
+            STATUS=$(aws cloudformation describe-stacks \
+                --stack-name "$PIPELINE_STACK_NAME" \
+                --region "$REGION" \
+                --query "Stacks[0].StackStatus" \
+                --output text 2>/dev/null)
+
+            case "$STATUS" in
+                UPDATE_COMPLETE)
+                    echo ""
+                    success "Pipeline stack updated successfully!"
+                    break
+                    ;;
+                UPDATE_IN_PROGRESS|UPDATE_COMPLETE_CLEANUP_IN_PROGRESS)
+                    echo -n "."
+                    sleep 10
+                    ;;
+                UPDATE_ROLLBACK_COMPLETE|UPDATE_ROLLBACK_IN_PROGRESS|UPDATE_FAILED|UPDATE_ROLLBACK_FAILED)
+                    echo ""
+                    fail "Pipeline stack update failed (status: $STATUS). Check the CloudFormation console."
+                    ;;
+                *)
+                    echo ""
+                    fail "Unexpected stack status: $STATUS"
+                    ;;
+            esac
+        done
+    fi
 else
     info "Creating pipeline stack '$PIPELINE_STACK_NAME'..."
 
@@ -325,7 +389,25 @@ else
 fi
 
 # =============================================================================
-# STEP 7: Display outputs
+# STEP 7: Upload Glue ETL script to S3
+# =============================================================================
+separator "Step 7: Uploading Glue ETL script"
+
+GLUE_SCRIPTS_BUCKET="iot-glue-scripts-${AWS_ACCOUNT_ID}"
+GLUE_SCRIPT_SRC="$PROJECT_ROOT/source/glue/iot_raw_to_clean.py"
+
+if [ ! -f "$GLUE_SCRIPT_SRC" ]; then
+    fail "Glue script not found at: $GLUE_SCRIPT_SRC"
+fi
+
+info "Uploading Glue script to s3://${GLUE_SCRIPTS_BUCKET}/scripts/iot_raw_to_clean.py"
+aws s3 cp "$GLUE_SCRIPT_SRC" \
+    "s3://${GLUE_SCRIPTS_BUCKET}/scripts/iot_raw_to_clean.py" \
+    --region "$REGION"
+success "Glue ETL script uploaded"
+
+# =============================================================================
+# STEP 8: Display outputs
 # =============================================================================
 separator "Deployment Complete!"
 

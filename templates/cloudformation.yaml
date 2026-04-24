@@ -49,6 +49,23 @@ Resources:
         Rules:
           - ObjectOwnership: BucketOwnerEnforced
 
+  S3BucketGlueScripts:
+    Type: "AWS::S3::Bucket"
+    Properties:
+      BucketName: !Sub "iot-glue-scripts-${AWS::AccountId}"
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+
   # ---------------------------------------------------------------------------
   # Kinesis Data Stream
   # ---------------------------------------------------------------------------
@@ -221,6 +238,8 @@ Resources:
                   - !Sub "${S3BucketRaw.Arn}/*"
                   - !GetAtt S3BucketClean.Arn
                   - !Sub "${S3BucketClean.Arn}/*"
+                  - !GetAtt S3BucketGlueScripts.Arn
+                  - !Sub "${S3BucketGlueScripts.Arn}/*"
 
   IoTRawGlueCrawler:
     Type: AWS::Glue::Crawler
@@ -241,6 +260,214 @@ Resources:
       Targets:
         S3Targets:
           - Path: !Sub "s3://${S3BucketClean}/iot-clean/"
+
+  # ---------------------------------------------------------------------------
+  # Glue ETL Job
+  # ---------------------------------------------------------------------------
+  IoTRawToCleanJob:
+    Type: AWS::Glue::Job
+    Properties:
+      Name: !Sub "iot-raw-to-clean-${AWS::StackName}"
+      Description: "Transforms raw IoT data, applies schema mapping and data quality checks, writes to clean bucket as Parquet"
+      Role: !GetAtt GlueServiceRole.Arn
+      Command:
+        Name: glueetl
+        ScriptLocation: !Sub "s3://${S3BucketGlueScripts}/scripts/iot_raw_to_clean.py"
+        PythonVersion: "3"
+      DefaultArguments:
+        "--job-bookmark-option": "job-bookmark-enable"
+        "--enable-metrics": "true"
+        "--enable-continuous-cloudwatch-log": "true"
+        "--additional-python-modules": "awsgluedq"
+        "--database_name": !Sub "iotdb_${AWS::StackName}"
+        "--table_name": "iot_raw"
+        "--output_path": !Sub "s3://${S3BucketClean}/iot-clean/"
+      GlueVersion: "4.0"
+      WorkerType: G.1X
+      NumberOfWorkers: 2
+      Timeout: 60
+      MaxRetries: 1
+
+  # ---------------------------------------------------------------------------
+  # Glue Workflow
+  # ---------------------------------------------------------------------------
+  IoTGlueWorkflow:
+    Type: AWS::Glue::Workflow
+    Properties:
+      Name: !Sub "iot-etl-workflow-${AWS::StackName}"
+      Description: "Orchestrates raw crawl, ETL job, then clean crawl for IoT data"
+      MaxConcurrentRuns: 1
+
+  WorkflowStartTrigger:
+    Type: AWS::Glue::Trigger
+    Properties:
+      Name: !Sub "iot-workflow-start-${AWS::StackName}"
+      Type: ON_DEMAND
+      WorkflowName: !Ref IoTGlueWorkflow
+      Actions:
+        - CrawlerName: !Sub "iot-raw-crawler-${AWS::StackName}"
+
+  WorkflowRawCrawlCompleteTrigger:
+    Type: AWS::Glue::Trigger
+    Properties:
+      Name: !Sub "iot-after-raw-crawl-${AWS::StackName}"
+      Type: CONDITIONAL
+      WorkflowName: !Ref IoTGlueWorkflow
+      StartOnCreation: true
+      Actions:
+        - JobName: !Sub "iot-raw-to-clean-${AWS::StackName}"
+      Predicate:
+        Conditions:
+          - LogicalOperator: EQUALS
+            CrawlerName: !Sub "iot-raw-crawler-${AWS::StackName}"
+            CrawlState: SUCCEEDED
+
+  WorkflowJobCompleteTrigger:
+    Type: AWS::Glue::Trigger
+    Properties:
+      Name: !Sub "iot-after-etl-job-${AWS::StackName}"
+      Type: CONDITIONAL
+      WorkflowName: !Ref IoTGlueWorkflow
+      StartOnCreation: true
+      Actions:
+        - CrawlerName: !Sub "iot-clean-crawler-${AWS::StackName}"
+      Predicate:
+        Conditions:
+          - LogicalOperator: EQUALS
+            JobName: !Sub "iot-raw-to-clean-${AWS::StackName}"
+            State: SUCCEEDED
+
+  # ---------------------------------------------------------------------------
+  # Step Functions State Machine (Demo - equivalent of Glue Workflow above)
+  # ---------------------------------------------------------------------------
+  StepFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "StepFunctionGlueRole-${AWS::StackName}"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: states.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: StepFunctionGluePolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - glue:StartCrawler
+                  - glue:GetCrawler
+                  - glue:StartJobRun
+                  - glue:GetJobRun
+                  - glue:GetJobRuns
+                  - glue:BatchStopJobRun
+                Resource: "*"
+
+  IoTETLStateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      StateMachineName: !Sub "iot-etl-stepfn-${AWS::StackName}"
+      RoleArn: !GetAtt StepFunctionRole.Arn
+      DefinitionString: !Sub |
+        {
+          "Comment": "Demo: Step Functions equivalent of the Glue Workflow - Raw Crawler > ETL Job > Clean Crawler",
+          "StartAt": "StartRawCrawler",
+          "States": {
+            "StartRawCrawler": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::aws-sdk:glue:startCrawler",
+              "Parameters": {
+                "Name": "iot-raw-crawler-${AWS::StackName}"
+              },
+              "ResultPath": null,
+              "Next": "WaitForRawCrawler"
+            },
+            "WaitForRawCrawler": {
+              "Type": "Wait",
+              "Seconds": 30,
+              "Next": "GetRawCrawlerStatus"
+            },
+            "GetRawCrawlerStatus": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::aws-sdk:glue:getCrawler",
+              "Parameters": {
+                "Name": "iot-raw-crawler-${AWS::StackName}"
+              },
+              "ResultPath": "$.CrawlerResult",
+              "Next": "CheckRawCrawlerDone"
+            },
+            "CheckRawCrawlerDone": {
+              "Type": "Choice",
+              "Choices": [
+                {
+                  "Variable": "$.CrawlerResult.Crawler.State",
+                  "StringEquals": "READY",
+                  "Next": "RunETLJob"
+                },
+                {
+                  "Variable": "$.CrawlerResult.Crawler.State",
+                  "StringEquals": "STOPPING",
+                  "Next": "WaitForRawCrawler"
+                }
+              ],
+              "Default": "WaitForRawCrawler"
+            },
+            "RunETLJob": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::glue:startJobRun.sync",
+              "Parameters": {
+                "JobName": "iot-raw-to-clean-${AWS::StackName}"
+              },
+              "ResultPath": "$.JobResult",
+              "Next": "StartCleanCrawler"
+            },
+            "StartCleanCrawler": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::aws-sdk:glue:startCrawler",
+              "Parameters": {
+                "Name": "iot-clean-crawler-${AWS::StackName}"
+              },
+              "ResultPath": null,
+              "Next": "WaitForCleanCrawler"
+            },
+            "WaitForCleanCrawler": {
+              "Type": "Wait",
+              "Seconds": 30,
+              "Next": "GetCleanCrawlerStatus"
+            },
+            "GetCleanCrawlerStatus": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::aws-sdk:glue:getCrawler",
+              "Parameters": {
+                "Name": "iot-clean-crawler-${AWS::StackName}"
+              },
+              "ResultPath": "$.CrawlerResult",
+              "Next": "CheckCleanCrawlerDone"
+            },
+            "CheckCleanCrawlerDone": {
+              "Type": "Choice",
+              "Choices": [
+                {
+                  "Variable": "$.CrawlerResult.Crawler.State",
+                  "StringEquals": "READY",
+                  "Next": "WorkflowComplete"
+                },
+                {
+                  "Variable": "$.CrawlerResult.Crawler.State",
+                  "StringEquals": "STOPPING",
+                  "Next": "WaitForCleanCrawler"
+                }
+              ],
+              "Default": "WaitForCleanCrawler"
+            },
+            "WorkflowComplete": {
+              "Type": "Succeed"
+            }
+          }
+        }
 
 Outputs:
   RawBucketName:
@@ -270,3 +497,19 @@ Outputs:
   IoTTopicRuleName:
     Description: "IoT Topic Rule name"
     Value: !Ref IoTTopicRule
+
+  GlueWorkflowName:
+    Description: "Glue Workflow name for IoT ETL orchestration"
+    Value: !Ref IoTGlueWorkflow
+
+  GlueJobName:
+    Description: "Glue ETL Job name"
+    Value: !Ref IoTRawToCleanJob
+
+  GlueScriptsBucketName:
+    Description: "S3 bucket for Glue ETL scripts"
+    Value: !Ref S3BucketGlueScripts
+
+  StepFunctionArn:
+    Description: "Step Functions state machine ARN (demo equivalent of Glue Workflow)"
+    Value: !Ref IoTETLStateMachine
